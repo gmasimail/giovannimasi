@@ -101,6 +101,8 @@ Il modulo valida nome, email, messaggio e consenso privacy. Include un campo ant
 - `public/contatti.html`: modulo per registrare una richiesta.
 - Le pagine includono navigazione comune, contatore e informativa privacy.
 - `public/styles.css`: colori, tipografia, impaginazione e versione mobile.
+- `public/brand.css`: dimensioni del logo originale e accenti indaco/giallo, su desktop e telefono.
+- `public/assets/sirius-logo.png`: logo originale fornito dall’azienda, usato senza ritocchi nella testata, nel piè di pagina, nella grafica delle orbite e come icona del sito. Il fondo bianco ne mantiene la leggibilità sul tema scuro.
 - `public/app.js`: interazioni, magazine, modulo contatti e contatore.
 - `public/effects.js`: ingresso progressivo dei riquadri durante lo scorrimento e riflesso luminoso che segue il puntatore, come nel riferimento. Gli effetti rispettano la preferenza di movimento ridotto del browser.
 - `fileArticoli/`: contenuti editoriali modificabili senza programmare.
