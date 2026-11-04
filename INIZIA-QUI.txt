@@ -36,6 +36,17 @@ I 14 articoli inclusi sono esempi: puoi modificarli o cancellarli.
 La data di pubblicazione scritta nel file è indipendente dall'ordine
 di inserimento. Non è necessario riavviare il sito dopo ogni articolo.
 
+PRIVACY E STATISTICHE
+
+Alla prima visita puoi accettare o rifiutare le statistiche facoltative.
+Il sito funziona anche rifiutando. Puoi cambiare idea dal collegamento
+Preferenze cookie nel pie di pagina. Il contatore si aggiorna per il tuo
+browser solo dopo l’accettazione.
+
+Per chiedere informazioni sui servizi non occorre accettare un consenso
+generico: il modulo presenta l’informativa prima dell’invio. Prima dell’uso
+pubblico vanno completati i dati reali del titolare e la relativa informativa.
+
 COSA SAPERE
 
 - Non aprire soltanto public/index.html: serve avviare il server.

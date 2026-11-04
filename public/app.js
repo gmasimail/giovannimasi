@@ -376,7 +376,13 @@ function closePrivacy() {
   if (focusedBeforePrivacy?.isConnected) focusedBeforePrivacy.focus({ preventScroll: true });
   if (/^\/privacy\/?$/.test(location.pathname)) history.replaceState({}, '', '/');
 }
-for (const button of $$('[data-open-privacy]')) button.addEventListener('click', openPrivacy);
+for (const trigger of $$('[data-open-privacy]')) trigger.addEventListener('click', event => {
+  if (trigger.tagName === 'A') {
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+    event.preventDefault();
+  }
+  openPrivacy();
+});
 for (const button of $$('[data-close-privacy]')) button.addEventListener('click', closePrivacy);
 $('#privacy-dialog')?.addEventListener('cancel', event => { event.preventDefault(); closePrivacy(); });
 for (const dialog of $$('dialog')) {
@@ -404,7 +410,7 @@ $('#contact-form')?.addEventListener('submit', async event => {
   if (button.disabled) return;
   const status = $('#contact-status');
   const fields = new FormData(form);
-  const payload = { name: String(fields.get('name')).trim(), email: String(fields.get('email')).trim(), message: String(fields.get('message')).trim(), privacy: fields.get('privacy') === 'on', website: fields.get('website') || '' };
+  const payload = { name: String(fields.get('name')).trim(), email: String(fields.get('email')).trim(), message: String(fields.get('message')).trim(), website: fields.get('website') || '' };
   status.className = 'form-status';
   status.textContent = 'Registrazione della richiesta…';
   button.disabled = true;
@@ -423,6 +429,8 @@ $('#contact-form')?.addEventListener('submit', async event => {
   }
 });
 
+$('#contact-submit')?.removeAttribute('disabled');
+
 const menuToggle = $('.menu-toggle');
 function closeMenu() {
   menuToggle?.setAttribute('aria-expanded', 'false');
@@ -440,14 +448,278 @@ document.addEventListener('keydown', event => { if (event.key === 'Escape') clos
 document.addEventListener('click', event => { if (!$('.site-header')?.contains(event.target)) closeMenu(); });
 window.matchMedia('(min-width: 821px)').addEventListener('change', event => { if (event.matches) closeMenu(); });
 
-async function refreshStats(register = false) {
+const PRIVACY_VERSION = '2026-11-04';
+const LOCAL_REFUSAL_KEY = 'sirius-statistics-rejected';
+let refusalStorageAvailable = true;
+let localRefusal = readLocalRefusal();
+let currentConsent = null;
+let consentExpiresAt = null;
+let consentGeneration = 0;
+let consentSaving = false;
+let consentNeedsVerification = false;
+let registeredVisit = false;
+let visitController;
+let privacyRefresh;
+let consentExpiryTimer;
+let preferencesOpenedManually = false;
+let focusedBeforePreferences;
+let statsRequestNumber = 0;
+
+function readLocalRefusal() {
   try {
-    const data = await api(register ? '/api/visit' : '/api/stats', register ? { method: 'POST' } : {});
-    $('#visit-count').textContent = numberFormatter.format(data.visits);
+    const saved = JSON.parse(localStorage.getItem(LOCAL_REFUSAL_KEY) || 'null');
+    if (saved && Number.isFinite(Date.parse(saved.expiresAt)) && Date.parse(saved.expiresAt) > Date.now()) return saved;
+    if (saved) localStorage.removeItem(LOCAL_REFUSAL_KEY);
+  } catch { refusalStorageAvailable = false; }
+  return null;
+}
+
+function hasLocalRefusal() {
+  return Boolean(localRefusal && Date.parse(localRefusal.expiresAt) > Date.now());
+}
+
+function rememberLocalRefusal() {
+  const expiry = new Date();
+  const day = expiry.getUTCDate();
+  expiry.setUTCDate(1);
+  expiry.setUTCMonth(expiry.getUTCMonth() + 6);
+  const lastDay = new Date(Date.UTC(expiry.getUTCFullYear(), expiry.getUTCMonth() + 1, 0)).getUTCDate();
+  expiry.setUTCDate(Math.min(day, lastDay));
+  const expiresAt = Math.max(expiry.getTime(), consentExpiresAt || 0, Date.parse(localRefusal?.expiresAt) || 0);
+  localRefusal = { expiresAt: new Date(expiresAt).toISOString() };
+  try {
+    localStorage.setItem(LOCAL_REFUSAL_KEY, JSON.stringify(localRefusal));
+    refusalStorageAvailable = localStorage.getItem(LOCAL_REFUSAL_KEY) === JSON.stringify(localRefusal);
+  } catch { refusalStorageAvailable = false; }
+  return refusalStorageAvailable;
+}
+
+function extendLocalRefusal(expiresAt) {
+  if (!hasLocalRefusal() || Date.parse(localRefusal.expiresAt) >= expiresAt) return;
+  localRefusal = { expiresAt: new Date(expiresAt).toISOString() };
+  try { localStorage.setItem(LOCAL_REFUSAL_KEY, JSON.stringify(localRefusal)); } catch { refusalStorageAvailable = false; }
+}
+
+function clearLocalRefusal() {
+  if (!localRefusal) return;
+  try {
+    localStorage.removeItem(LOCAL_REFUSAL_KEY);
+    if (localStorage.getItem(LOCAL_REFUSAL_KEY) !== null) throw new Error('Preferenza locale non rimossa.');
+    localRefusal = null;
   } catch {
-    $('#visit-count').textContent = '—';
+    throw new Error('Le statistiche restano disattivate: il browser non consente di aggiornare la precedente preferenza locale di rifiuto. Riprova dalle preferenze cookie.');
   }
 }
+
+function statisticsAllowed() {
+  return currentConsent === 'accepted' && !hasLocalRefusal() && !consentSaving && !consentNeedsVerification && consentExpiresAt > Date.now();
+}
+
+function showCookieStatus(message, error = false) {
+  const status = $('#cookie-status');
+  if (!status) return;
+  status.textContent = message;
+  status.classList.toggle('is-error', error);
+}
+
+function renderCookiePreference() {
+  const status = $('#cookie-current-status');
+  if (status) status.textContent = currentConsent === 'accepted'
+    ? 'Scelta attuale: statistiche attive. Puoi revocare la scelta in qualsiasi momento.'
+    : currentConsent === 'rejected'
+      ? 'Scelta attuale: statistiche disattivate. Puoi cambiarla in qualsiasi momento.'
+      : 'Le statistiche sono disattivate finché non scegli di accettarle.';
+  for (const button of $$('[data-open-cookie-preferences]')) {
+    button.setAttribute('aria-expanded', String(!$('#cookie-preferences')?.hidden));
+    button.setAttribute('aria-controls', 'cookie-preferences');
+  }
+}
+
+function showCookiePreferences() {
+  const banner = $('#cookie-preferences');
+  if (banner) banner.hidden = false;
+  renderCookiePreference();
+}
+
+function hideCookiePreferences() {
+  const banner = $('#cookie-preferences');
+  const restoreFocus = preferencesOpenedManually &&
+    (banner?.contains(document.activeElement) || document.activeElement === document.body);
+  if (banner) banner.hidden = true;
+  preferencesOpenedManually = false;
+  renderCookiePreference();
+  if (restoreFocus && focusedBeforePreferences?.isConnected) focusedBeforePreferences.focus({ preventScroll: true });
+  focusedBeforePreferences = null;
+}
+
+function scheduleConsentExpiry() {
+  clearTimeout(consentExpiryTimer);
+  if (!consentExpiresAt) return;
+  const remaining = consentExpiresAt - Date.now();
+  if (remaining > 0) {
+    consentExpiryTimer = setTimeout(scheduleConsentExpiry, Math.min(remaining + 1, 2_147_483_647));
+    return;
+  }
+  consentGeneration++;
+  localRefusal = readLocalRefusal();
+  currentConsent = null;
+  consentExpiresAt = null;
+  registeredVisit = false;
+  visitController?.abort();
+  showCookieStatus('La preferenza è scaduta. Puoi scegliere nuovamente; nel frattempo le statistiche sono disattivate.');
+  showCookiePreferences();
+}
+
+function applyPrivacyState(data, confirmedAcceptance = false) {
+  if (data?.version !== PRIVACY_VERSION || ![null, 'accepted', 'rejected'].includes(data.statistics)) {
+    throw new Error('Le preferenze restituite dal server non sono valide. Le statistiche restano disattivate.');
+  }
+  const expiresAt = data.statistics === null ? null : Date.parse(data.expiresAt);
+  if (data.statistics !== null && (!Number.isFinite(expiresAt) || expiresAt <= Date.now())) {
+    throw new Error('La preferenza è scaduta. Scegli nuovamente se attivare le statistiche.');
+  }
+  if (confirmedAcceptance && data.statistics === 'accepted') clearLocalRefusal();
+  if (hasLocalRefusal() && data.statistics === 'rejected') extendLocalRefusal(expiresAt);
+  const refusalOverridesServer = hasLocalRefusal();
+  const effectiveConsent = refusalOverridesServer ? 'rejected' : data.statistics;
+  if (currentConsent !== effectiveConsent) registeredVisit = false;
+  currentConsent = effectiveConsent;
+  consentExpiresAt = refusalOverridesServer ? Date.parse(localRefusal.expiresAt) : expiresAt;
+  if (currentConsent !== 'accepted') visitController?.abort();
+  scheduleConsentExpiry();
+  renderCookiePreference();
+  if (refusalOverridesServer && data.statistics === 'accepted') {
+    showCookieStatus('Il rifiuto è memorizzato in questo browser, ma il server non lo ha ancora confermato. Le statistiche restano disattivate. Premi Rifiuta statistiche per riprovare.', true);
+    showCookiePreferences();
+  } else if (currentConsent === null || preferencesOpenedManually) showCookiePreferences();
+  else hideCookiePreferences();
+}
+
+async function refreshStats(register = false) {
+  const shouldRegister = register && statisticsAllowed() && !registeredVisit;
+  if (shouldRegister && visitController) return;
+  const requestNumber = ++statsRequestNumber;
+  const generation = consentGeneration;
+  const controller = shouldRegister ? new AbortController() : null;
+  if (controller) visitController = controller;
+  try {
+    const data = await api(shouldRegister ? '/api/visit' : '/api/stats', shouldRegister
+      ? { method: 'POST', signal: controller.signal, cache: 'no-store' }
+      : { cache: 'no-store' });
+    if (shouldRegister && (generation !== consentGeneration || !statisticsAllowed())) return;
+    if (shouldRegister) registeredVisit = true;
+    if (requestNumber === statsRequestNumber) $('#visit-count').textContent = numberFormatter.format(data.visits);
+  } catch (error) {
+    if (error.name === 'AbortError') return;
+    if (shouldRegister) await refreshStats();
+    else if (requestNumber === statsRequestNumber) $('#visit-count').textContent = '—';
+  } finally {
+    if (controller && visitController === controller) visitController = null;
+  }
+}
+
+async function refreshPrivacyAndStats() {
+  if (privacyRefresh) return privacyRefresh;
+  privacyRefresh = (async () => {
+    const generation = consentGeneration;
+    if (!consentSaving && !consentNeedsVerification) {
+      try {
+        const data = await api('/api/privacy', { cache: 'no-store' });
+        if (generation !== consentGeneration) return;
+        applyPrivacyState(data);
+      } catch (error) {
+        if (generation !== consentGeneration) return;
+        currentConsent = null;
+        consentExpiresAt = null;
+        registeredVisit = false;
+        visitController?.abort();
+        showCookieStatus('Non riusciamo a verificare la preferenza. Le statistiche restano disattivate. Puoi scegliere qui sotto per riprovare.', true);
+        showCookiePreferences();
+      }
+    }
+    await refreshStats(true);
+  })();
+  try { await privacyRefresh; } finally { privacyRefresh = null; }
+}
+
+async function saveCookiePreference(choice) {
+  if (consentSaving || !['accepted', 'rejected'].includes(choice)) return;
+  const refusalPersisted = choice === 'rejected' ? rememberLocalRefusal() : true;
+  consentSaving = true;
+  consentNeedsVerification = true;
+  const generation = ++consentGeneration;
+  visitController?.abort();
+  clearTimeout(consentExpiryTimer);
+  currentConsent = null;
+  consentExpiresAt = null;
+  registeredVisit = false;
+  renderCookiePreference();
+  const buttons = $$('[data-cookie-choice]');
+  for (const button of buttons) button.disabled = true;
+  $('#cookie-preferences')?.setAttribute('aria-busy', 'true');
+  showCookieStatus('Salvataggio della preferenza…');
+  try {
+    await api('/api/privacy', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ statistics: choice }), cache: 'no-store'
+    });
+    if (generation !== consentGeneration) throw new Error('La scelta è stata aggiornata in un’altra scheda. Le statistiche restano disattivate; verifica le preferenze cookie.');
+    const confirmed = await api('/api/privacy', { cache: 'no-store' });
+    if (generation !== consentGeneration) throw new Error('La scelta è stata aggiornata in un’altra scheda. Le statistiche restano disattivate; verifica le preferenze cookie.');
+    if (confirmed?.statistics !== choice) {
+      throw new Error('La preferenza non è stata salvata dal browser. Puoi navigare senza statistiche; verifica che i cookie tecnici siano abilitati e riprova.');
+    }
+    applyPrivacyState(confirmed, choice === 'accepted');
+    consentNeedsVerification = false;
+    showCookieStatus('Preferenza salvata. Puoi cambiarla dal collegamento Preferenze cookie.');
+    hideCookiePreferences();
+  } catch (error) {
+    currentConsent = hasLocalRefusal() ? 'rejected' : null;
+    consentExpiresAt = hasLocalRefusal() ? Date.parse(localRefusal.expiresAt) : null;
+    registeredVisit = false;
+    const storageWarning = choice === 'rejected' && !refusalPersisted
+      ? ' Il browser non consente di memorizzare il rifiuto locale: riprova prima di aprire altre pagine o ricaricare, perché la precedente scelta potrebbe restare attiva.' : '';
+    showCookieStatus((error.message || 'Non riusciamo a salvare la scelta. Le statistiche restano disattivate: riprova.') + storageWarning, true);
+    showCookiePreferences();
+  } finally {
+    consentSaving = false;
+    for (const button of buttons) button.disabled = false;
+    $('#cookie-preferences')?.setAttribute('aria-busy', 'false');
+    await refreshStats(true);
+  }
+}
+
+for (const button of $$('[data-cookie-choice]')) button.addEventListener('click', () => saveCookiePreference(button.dataset.cookieChoice));
+for (const button of $$('[data-open-cookie-preferences]')) button.addEventListener('click', () => {
+  if (!preferencesOpenedManually) focusedBeforePreferences = document.activeElement;
+  preferencesOpenedManually = true;
+  showCookiePreferences();
+  const heading = $('#cookie-title');
+  heading?.setAttribute('tabindex', '-1');
+  heading?.focus({ preventScroll: true });
+  refreshPrivacyAndStats();
+});
+window.addEventListener('storage', event => {
+  if (event.key !== LOCAL_REFUSAL_KEY && event.key !== null) return;
+  localRefusal = readLocalRefusal();
+  consentGeneration++;
+  visitController?.abort();
+  registeredVisit = false;
+  if (hasLocalRefusal()) {
+    currentConsent = 'rejected';
+    consentExpiresAt = Date.parse(localRefusal.expiresAt);
+    scheduleConsentExpiry();
+    renderCookiePreference();
+    if (!preferencesOpenedManually) hideCookiePreferences();
+  } else {
+    currentConsent = null;
+    consentExpiresAt = null;
+    clearTimeout(consentExpiryTimer);
+    renderCookiePreference();
+    // Removing the local safeguard never grants consent: the server must confirm it.
+    if (!consentSaving && !consentNeedsVerification) refreshPrivacyAndStats();
+  }
+});
 
 function setTheme(theme, persist = false) {
   document.documentElement.dataset.theme = theme;
@@ -505,12 +777,12 @@ async function loadRecentArticles({ silent = false } = {}) {
 $('#current-year').textContent = String(new Date().getFullYear());
 loadArticles();
 loadRecentArticles();
-refreshStats(true);
+refreshPrivacyAndStats();
 function refreshVisibleContent() {
   if (!document.hidden) {
     loadArticles({ silent: true });
     loadRecentArticles({ silent: true });
-    refreshStats();
+    refreshPrivacyAndStats();
   }
 }
 setInterval(refreshVisibleContent, 30_000);

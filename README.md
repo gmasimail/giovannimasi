@@ -82,13 +82,13 @@ Word e PDF non sono interpretati come articoli: esporta o copia il testo in uno 
 
 ## 3. Contatore delle visite
 
-Il contatore è condiviso tra i visitatori e viene salvato sul server nella cartella `data`. Conta una visita per sessione del browser attraverso un cookie tecnico: ricaricare la pagina nella stessa sessione non aggiunge visite. Una nuova sessione può aggiungerne una.
+Il contatore è condiviso tra i visitatori e viene salvato sul server nella cartella `data`. Le statistiche sono facoltative per scelta progettuale: alla prima visita sono disattivate e il sito propone **Accetta statistiche** e **Rifiuta statistiche** con pari evidenza. Il sito resta utilizzabile rifiutando. Solo dopo l’accettazione viene attivato il cookie di sessione del contatore; ricaricare la pagina nella stessa sessione non aggiunge accessi. Il totale storico già presente viene conservato, mentre i nuovi accessi sono registrati soltanto con una scelta valida di accettazione.
 
 Non rappresenta il numero di persone uniche e non è un sistema di analisi certificato: cookie bloccati, strumenti automatici e comportamenti del browser possono influire sul totale. Non vengono usati servizi di analisi esterni. La scelta del tema chiaro o scuro è salvata soltanto nel browser come preferenza tecnica. I dati restano disponibili dopo il riavvio del server; conserva la cartella `data` quando aggiorni il sito e includila nei backup.
 
 ## 4. Modulo contatti
 
-Il modulo valida nome, email, messaggio e consenso privacy. Include un campo antispam nascosto e un limite alle richieste. Le richieste valide vengono registrate in **`data/messages.ndjson`**, un oggetto JSON per riga, leggibile con un editor di testo.
+Il modulo mostra il collegamento all’informativa prima dell’invio e valida nome, email e messaggio. Non impone un consenso generico per gestire richieste sui servizi e attività precontrattuali: il trattamento necessario a tali richieste si basa sull’art. 6, par. 1, lett. b GDPR. Include un campo antispam nascosto e un limite alle richieste. I nuovi messaggi riportano la versione dell’informativa applicata, che non è una dichiarazione di consenso né una prova di lettura. Le richieste valide vengono registrate in **`data/messages.ndjson`**, un oggetto JSON per riga, leggibile con un editor di testo.
 
 **Non vengono inviate email.** Per leggere le richieste apri quel file sul computer o server che ospita Sirius. Il file non è accessibile attraverso il sito web. Non inserire dati sensibili nei messaggi. Un eventuale invio email richiede una configurazione successiva con un servizio di posta.
 
@@ -99,6 +99,7 @@ Il modulo valida nome, email, messaggio e consenso privacy. Include un campo ant
 - `public/soluzioni.html`: aree di intervento e accompagnamento al cambiamento.
 - `public/articoli.html`: archivio con ricerca, filtri e paginazione.
 - `public/contatti.html`: modulo per registrare una richiesta.
+- `public/privacy.html`: informativa consultabile anche senza JavaScript; il modulo contatti resta disabilitato finché il relativo script non è caricato, evitando invii accidentali dei dati nella URL.
 - Le pagine includono navigazione comune, contatore e informativa privacy.
 - `public/styles.css`: colori, tipografia, impaginazione e versione mobile.
 - `public/brand.css`: dimensioni del logo originale e accenti indaco/giallo, su desktop e telefono.
@@ -125,6 +126,22 @@ npm test
 ```
 
 I test usano cartelle temporanee e non modificano i tuoi articoli o contatti. Sono verificati i comportamenti del server, inclusi articoli, filtri, ordine, paginazione, conteggio e contatti.
+
+## Privacy e preferenze
+
+L’informativa spiega come vengono usati i dati: non è un contratto da “accettare”. Il consenso è richiesto nel sito soltanto per le statistiche facoltative. Non sono presenti newsletter, marketing o profilazione pubblicitaria. Il limite antispam del modulo usa l’indirizzo della connessione soltanto nella memoria del processo; l’informativa ne descrive separatamente la finalità di sicurezza e la necessità di valutare la base pertinente.
+
+- **Accetta statistiche** attiva il contatore facoltativo.
+- **Rifiuta statistiche**, oppure la X per continuare senza statistiche, lascia il contatore disattivato per quel browser.
+- **Preferenze cookie**, nel piè di pagina di ogni pagina, permette di modificare o revocare la scelta. Il rifiuto successivo elimina il cookie di sessione del contatore e blocca nuove registrazioni.
+- La preferenza è ricordata per sei mesi di calendario tramite un cookie funzionale firmato. È una durata scelta per questa implementazione, non una scadenza universale imposta al consenso dalla legge.
+- Il server conserva una prova tecnica minima della scelta in `data/privacy-events.ndjson`: identificativo della ricevuta, scelta, versione dell’informativa e date, senza nomi, email o indirizzi IP. Gli eventi scaduti vengono rimossi durante le operazioni sulle preferenze.
+- Un rifiuto viene salvato anche nella memoria locale del browser (`sirius-statistics-rejected`), per evitare riattivazioni in caso di errori di rete, ricaricamenti o altre schede. Questa preferenza non può mai attivare le statistiche: viene rimossa solo dopo una nuova accettazione verificata.
+- La scelta del tema richiesta dal visitatore e la memorizzazione delle preferenze cookie sono funzioni del sito, spiegate nell’informativa.
+
+Prima di raccogliere dati su un sito pubblico, completare e verificare l’informativa con **identità e recapiti del titolare, sede, conservazione effettiva dei contatti, destinatari/fornitori, eventuali trasferimenti e modalità di esercizio dei diritti**. I dati societari non sono stati inventati: sono ancora da fornire. Per richieste diverse da quelle sui servizi e precontrattuali, va valutata la base giuridica pertinente. La correttezza di questi meccanismi tecnici non costituisce una verifica completa di conformità dell’attività aziendale.
+
+Riferimenti ufficiali: [GDPR, artt. 6, 7 e 13](https://eur-lex.europa.eu/eli/reg/2016/679/oj?locale=it) e [Garante, Linee guida cookie del 10 giugno 2021](https://www.garanteprivacy.it/home/docweb/-/docweb-display/docweb/9677876). Le condizioni per assimilare determinati analytics ai tecnici vanno valutate nel caso concreto; questo sito sceglie invece l’attivazione facoltativa tramite consenso.
 
 ## Note sui file
 

@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { once } from 'node:events';
 import { createServer } from '../server.mjs';
 
-async function fixture(t) {
+async function fixture(t, options = {}) {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sirius-test-'));
   fs.mkdirSync(path.join(rootDir, 'public'));
   fs.mkdirSync(path.join(rootDir, 'fileArticoli'));
@@ -15,7 +16,7 @@ async function fixture(t) {
     fs.writeFileSync(path.join(rootDir, 'public', `${page}.html`), `<h1>Sirius ${page}</h1>`);
   }
   fs.writeFileSync(path.join(rootDir, 'public', 'app.js'), 'console.log("Sirius");');
-  const server = createServer({ rootDir });
+  const server = createServer({ rootDir, ...options });
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -33,6 +34,15 @@ async function fixture(t) {
   const request = (url, options) => fetch(`${base}${url}`, options);
   return { rootDir, server, request, article };
 }
+
+const privacyPost = statistics => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ statistics }) });
+const cookieFrom = (response, name) => response.headers.getSetCookie().find(value => value.startsWith(`${name}=`))?.split(';')[0];
+const privacyRecords = rootDir => fs.readFileSync(path.join(rootDir, 'data', 'privacy-events.ndjson'), 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
+const signedPreference = (rootDir, preference) => {
+  const secret = fs.readFileSync(path.join(rootDir, 'data', 'session-secret'), 'utf8').trim();
+  const payload = Buffer.from(JSON.stringify(preference)).toString('base64url');
+  return `sirius_privacy=${payload}.${crypto.createHmac('sha256', secret).update(`privacy:${payload}`).digest('base64url')}`;
+};
 
 test('discovery live, ordinamento file decrescente e paginazione 10/20/30', async t => {
   const { request, article } = await fixture(t);
@@ -133,39 +143,130 @@ test('paginazione valida anche con parametri non validi e oltre ultima pagina', 
   assert.equal((await (await request('/api/articles?page=-3')).json()).page, 1);
 });
 
-test('contatore condiviso persistente: una visita per cookie sessione e firme verificate', async t => {
+test('nessuna statistica o cookie di tracciamento prima della scelta, sessione legacy eliminata', async t => {
   const { request, rootDir } = await fixture(t);
+  const initial = await request('/api/privacy');
+  assert.deepEqual(await initial.json(), { version: '2026-11-04', statistics: null, expiresAt: null });
+  assert.equal(initial.headers.get('set-cookie'), null);
+  assert.equal((await request('/')).headers.get('set-cookie'), null);
+  const stats = await request('/api/stats');
+  assert.deepEqual(await stats.json(), { visits: 0 });
+  assert.equal(stats.headers.get('set-cookie'), null);
+  assert.equal(fs.existsSync(path.join(rootDir, 'data', 'privacy-events.ndjson')), false);
+  assert.equal((await request('/api/visit', { method: 'POST' })).status, 403);
+  const legacy = await request('/api/privacy', { headers: { cookie: 'sirius_session=legacy' } });
+  assert.match(legacy.headers.get('set-cookie'), /^sirius_session=;.*Max-Age=0/);
   assert.equal((await (await request('/api/stats')).json()).visits, 0);
-  const first = await request('/api/visit', { method: 'POST' });
-  const cookie = first.headers.get('set-cookie').split(';')[0];
+});
+
+test('accettazione esplicita e prova minima persistenti, una visita per sessione con firma verificata', async t => {
+  const { request, rootDir } = await fixture(t);
+  const accepted = await request('/api/privacy', privacyPost('accepted'));
+  assert.equal(accepted.status, 200);
+  const preference = await accepted.json();
+  assert.equal(preference.version, '2026-11-04');
+  assert.equal(preference.statistics, 'accepted');
+  const privacyCookie = cookieFrom(accepted, 'sirius_privacy');
+  assert.ok(privacyCookie);
+  assert.match(accepted.headers.get('set-cookie'), /HttpOnly; SameSite=Lax; Max-Age=\d+; Expires=/);
+  assert.equal(cookieFrom(accepted, 'sirius_session'), undefined);
+  const records = privacyRecords(rootDir);
+  assert.equal(records.length, 1);
+  assert.deepEqual(Object.keys(records[0]).sort(), ['choice', 'createdAt', 'expiresAt', 'receiptId', 'version']);
+  assert.equal(records[0].choice, 'accepted');
+  assert.equal(records[0].version, preference.version);
+  assert.equal(records[0].expiresAt, preference.expiresAt);
+  const decoded = JSON.parse(Buffer.from(privacyCookie.split('=')[1].split('.')[0], 'base64url').toString('utf8'));
+  assert.deepEqual(decoded, records[0]);
+  assert.deepEqual(await (await request('/api/privacy', { headers: { cookie: privacyCookie } })).json(), preference);
+  assert.equal((await (await request('/api/stats')).json()).visits, 0);
+  const first = await request('/api/visit', { method: 'POST', headers: { cookie: privacyCookie } });
+  const cookie = cookieFrom(first, 'sirius_session');
   assert.match(first.headers.get('set-cookie'), /HttpOnly; SameSite=Lax/);
   assert.equal((await first.json()).visits, 1);
-  const second = await request('/api/visit', { method: 'POST', headers: { cookie } });
+  const second = await request('/api/visit', { method: 'POST', headers: { cookie: `${privacyCookie}; ${cookie}` } });
   assert.equal((await second.json()).visits, 1);
   assert.equal(second.headers.get('set-cookie'), null);
-  const third = await request('/api/visit', { method: 'POST' });
+  const third = await request('/api/visit', { method: 'POST', headers: { cookie: privacyCookie } });
   assert.equal((await third.json()).visits, 2);
   const tampered = cookie.replace(/.$/, cookie.endsWith('x') ? 'y' : 'x');
-  assert.equal((await (await request('/api/visit', { method: 'POST', headers: { cookie: tampered } })).json()).visits, 3);
+  assert.equal((await (await request('/api/visit', { method: 'POST', headers: { cookie: `${privacyCookie}; ${tampered}` } })).json()).visits, 3);
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(rootDir, 'data', 'visits.json'), 'utf8')), { visits: 3 });
   // A second instance of the factory must read the saved counter and same signing secret.
   const restarted = createServer({ rootDir });
   restarted.listen(0, '127.0.0.1');
   await once(restarted, 'listening');
   try {
-    const response = await fetch(`http://127.0.0.1:${restarted.address().port}/api/visit`, { method: 'POST', headers: { cookie } });
+    const response = await fetch(`http://127.0.0.1:${restarted.address().port}/api/visit`, { method: 'POST', headers: { cookie: `${privacyCookie}; ${cookie}` } });
     assert.equal((await response.json()).visits, 3);
+    const restored = await fetch(`http://127.0.0.1:${restarted.address().port}/api/privacy`, { headers: { cookie: privacyCookie } });
+    assert.deepEqual(await restored.json(), preference);
   } finally {
     restarted.closeAllConnections();
     await new Promise(resolve => restarted.close(resolve));
   }
 });
 
+test('rifiuto persistente e revoca eliminano la sessione, senza impedire sito o conteggio aggregato', async t => {
+  const { request, rootDir } = await fixture(t);
+  const accepted = await request('/api/privacy', privacyPost('accepted'));
+  const acceptedCookie = cookieFrom(accepted, 'sirius_privacy');
+  const visit = await request('/api/visit', { method: 'POST', headers: { cookie: acceptedCookie } });
+  const sessionCookie = cookieFrom(visit, 'sirius_session');
+  assert.equal((await visit.json()).visits, 1);
+  const rejected = await request('/api/privacy', { ...privacyPost('rejected'), headers: { 'Content-Type': 'application/json', cookie: `${acceptedCookie}; ${sessionCookie}` } });
+  const preference = await rejected.json();
+  assert.equal(preference.statistics, 'rejected');
+  const rejectedCookie = cookieFrom(rejected, 'sirius_privacy');
+  assert.match(rejected.headers.getSetCookie().find(value => value.startsWith('sirius_session=')), /Max-Age=0/);
+  const saved = await request('/api/privacy', { headers: { cookie: rejectedCookie } });
+  assert.deepEqual(await saved.json(), preference);
+  assert.equal(saved.headers.get('set-cookie'), null);
+  const blocked = await request('/api/visit', { method: 'POST', headers: { cookie: `${rejectedCookie}; ${sessionCookie}` } });
+  assert.equal(blocked.status, 403);
+  assert.match(blocked.headers.get('set-cookie'), /^sirius_session=;.*Max-Age=0/);
+  assert.equal((await request('/', { headers: { cookie: rejectedCookie } })).status, 200);
+  assert.equal((await (await request('/api/stats')).json()).visits, 1);
+  assert.deepEqual(privacyRecords(rootDir).map(record => record.choice), ['accepted', 'rejected']);
+});
+
+test('scelte manomesse, scadute, senza prova o con versione precedente non autorizzano statistiche; prove scadute rimosse', async t => {
+  const { request, rootDir } = await fixture(t);
+  const accepted = await request('/api/privacy', privacyPost('accepted'));
+  const privacyCookie = cookieFrom(accepted, 'sirius_privacy');
+  const active = privacyRecords(rootDir)[0];
+  const visit = await request('/api/visit', { method: 'POST', headers: { cookie: privacyCookie } });
+  const sessionCookie = cookieFrom(visit, 'sirius_session');
+  const expired = { ...active, receiptId: crypto.randomUUID(), createdAt: '2020-08-31T12:00:00.000Z', expiresAt: '2021-02-28T12:00:00.000Z' };
+  const obsolete = { ...active, receiptId: crypto.randomUUID(), version: '2020-01-01' };
+  fs.appendFileSync(path.join(rootDir, 'data', 'privacy-events.ndjson'), `${JSON.stringify(expired)}\n${JSON.stringify(obsolete)}\n`);
+  const absentProof = { ...active, receiptId: crypto.randomUUID() };
+  const tampered = privacyCookie.replace(/.$/, privacyCookie.endsWith('x') ? 'y' : 'x');
+  for (const cookie of [tampered, `${privacyCookie}.extra`, signedPreference(rootDir, expired), signedPreference(rootDir, obsolete), signedPreference(rootDir, absentProof)]) {
+    const response = await request('/api/privacy', { headers: { cookie: `${cookie}; ${sessionCookie}` } });
+    assert.deepEqual(await response.json(), { version: '2026-11-04', statistics: null, expiresAt: null });
+    assert.match(response.headers.getSetCookie().find(value => value.startsWith('sirius_session=')), /Max-Age=0/);
+    assert.equal((await request('/api/visit', { method: 'POST', headers: { cookie: `${cookie}; ${sessionCookie}` } })).status, 403);
+  }
+  assert.equal((await (await request('/api/stats')).json()).visits, 1);
+  assert.deepEqual(privacyRecords(rootDir).map(record => record.receiptId), [active.receiptId, obsolete.receiptId]);
+  fs.appendFileSync(path.join(rootDir, 'data', 'privacy-events.ndjson'), `${JSON.stringify(expired)}\n`);
+  assert.equal((await request('/api/privacy', privacyPost('rejected'))).status, 200);
+  assert.equal(privacyRecords(rootDir).some(record => record.receiptId === expired.receiptId), false);
+});
+
+test('preferenza tecnica Secure valida sei mesi di calendario, con fine mese corretto', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2028-08-31T12:34:56.000Z') });
+  const { request } = await fixture(t, { secureCookies: true });
+  const response = await request('/api/privacy', privacyPost('rejected'));
+  assert.equal((await response.json()).expiresAt, '2029-02-28T12:34:56.000Z');
+  assert.match(response.headers.getSetCookie().find(cookie => cookie.startsWith('sirius_privacy=')), /HttpOnly; SameSite=Lax; Secure; Max-Age=15638400; Expires=Wed, 28 Feb 2029 12:34:56 GMT/);
+});
+
 test('contatti: validazione, salvataggio locale, honeypot e limite invii', async t => {
   const { request, rootDir } = await fixture(t);
   const post = body => request('/api/contact', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  const valid = { name: 'Giovanni Masi', email: 'giovanni@example.com', message: 'Vorrei sapere di più sul vostro progetto.', privacy: true, website: '' };
-  assert.equal((await post({ ...valid, privacy: false })).status, 400);
+  const valid = { name: 'Giovanni Masi', email: 'giovanni@example.com', message: 'Vorrei sapere di più sul vostro progetto.', website: '' };
   assert.equal((await post({ ...valid, email: 'non-email' })).status, 400);
   assert.equal((await post({ ...valid, message: 'ciao' })).status, 400);
   assert.equal((await post({ ...valid, website: 'spam.example.com' })).status, 200);
@@ -176,9 +277,15 @@ test('contatti: validazione, salvataggio locale, honeypot e limite invii', async
   const stored = JSON.parse(fs.readFileSync(path.join(rootDir, 'data', 'messages.ndjson'), 'utf8').trim());
   assert.equal(stored.email, valid.email);
   assert.equal(stored.message, valid.message);
-  for (let i = 1; i < 5; i++) assert.equal((await post(valid)).status, 200);
+  assert.equal(stored.privacyNoticeVersion, '2026-11-04');
+  assert.equal(Object.hasOwn(stored, 'privacy'), false);
+  assert.equal((await post({ ...valid, privacy: false })).status, 200);
+  assert.equal((await post({ ...valid, privacy: true })).status, 200);
+  for (let i = 3; i < 5; i++) assert.equal((await post(valid)).status, 200);
   assert.equal((await post(valid)).status, 429);
-  assert.equal(fs.readFileSync(path.join(rootDir, 'data', 'messages.ndjson'), 'utf8').trim().split('\n').length, 5);
+  const messages = fs.readFileSync(path.join(rootDir, 'data', 'messages.ndjson'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
+  assert.equal(messages.length, 5);
+  assert.ok(messages.every(message => !Object.hasOwn(message, 'privacy') && message.privacyNoticeVersion === '2026-11-04'));
 });
 
 test('nessun file privato esposto, traversal/symlink bloccati e fallback articolo', async t => {
@@ -204,6 +311,14 @@ test('mutazioni cross-site, richieste oversized e payload malformati rifiutati',
   const { request } = await fixture(t);
   assert.equal((await request('/api/visit', { method: 'POST', headers: { Origin: 'https://altro.example' } })).status, 403);
   assert.equal((await request('/api/visit', { method: 'POST', headers: { 'Sec-Fetch-Site': 'cross-site' } })).status, 403);
+  assert.equal((await request('/api/privacy', { ...privacyPost('accepted'), headers: { 'Content-Type': 'application/json', Origin: 'https://altro.example' } })).status, 403);
+  assert.equal((await request('/api/privacy', { ...privacyPost('accepted'), headers: { 'Content-Type': 'application/json', 'Sec-Fetch-Site': 'cross-site' } })).status, 403);
+  for (const statistics of [undefined, null, true, false, 'accept', '']) {
+    assert.equal((await request('/api/privacy', privacyPost(statistics))).status, 400);
+  }
+  assert.equal((await request('/api/privacy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{nonjson' })).status, 400);
+  assert.equal((await request('/api/privacy', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ statistics: 'a'.repeat(40000) }) })).status, 413);
+  assert.equal((await request('/api/privacy', { method: 'POST', body: 'statistics=accepted' })).status, 415);
   assert.equal((await request('/api/contact', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{nonjson' })).status, 400);
   assert.equal((await request('/api/contact', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: 'a'.repeat(40000) }) })).status, 413);
   assert.equal((await request('/api/contact', { method: 'POST', body: 'nome=Giovanni' })).status, 415);

@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const projectDir = path.dirname(fileURLToPath(import.meta.url));
+const PRIVACY_VERSION = '2026-11-04';
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
@@ -160,9 +161,24 @@ async function readBody(request) {
 }
 
 function atomicJSON(filename, value) {
+  atomicWrite(filename, JSON.stringify(value, null, 2));
+}
+
+function atomicWrite(filename, content) {
   const temporary = `${filename}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`;
-  fs.writeFileSync(temporary, JSON.stringify(value, null, 2), { mode: 0o600 });
+  fs.writeFileSync(temporary, content, { mode: 0o600 });
   fs.renameSync(temporary, filename);
+}
+
+// Keep the same UTC time and clamp month-end dates (for example, August 31 -> February 28).
+function sixCalendarMonthsAfter(value) {
+  const result = new Date(value);
+  const day = result.getUTCDate();
+  result.setUTCDate(1);
+  result.setUTCMonth(result.getUTCMonth() + 6);
+  const lastDay = new Date(Date.UTC(result.getUTCFullYear(), result.getUTCMonth() + 1, 0)).getUTCDate();
+  result.setUTCDate(Math.min(day, lastDay));
+  return result;
 }
 
 /** The server needs one process and a writable dataDir. Exposed options also support isolated tests. */
@@ -193,6 +209,54 @@ export function createServer(options = {}) {
     const [id, signature, extra] = value.split('.');
     if (extra || !/^[a-f0-9-]{36}$/.test(id || '') || !/^[\w-]{43}$/.test(signature || '')) return false;
     return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(sign(id)));
+  }
+  const privacyEventsFile = path.join(dataDir, 'privacy-events.ndjson');
+  const cookieAttributes = `Path=/; HttpOnly; SameSite=Lax${options.secureCookies || process.env.COOKIE_SECURE === '1' ? '; Secure' : ''}`;
+  const cookieValue = (request, name) => String(request.headers.cookie || '').split(';')
+    .map(value => value.trim()).find(value => value.startsWith(`${name}=`))?.slice(name.length + 1);
+  const setCookie = (response, cookie) => {
+    const existing = response.getHeader('Set-Cookie');
+    response.setHeader('Set-Cookie', [...(Array.isArray(existing) ? existing : existing ? [existing] : []), cookie]);
+  };
+  const clearCookie = (response, name) => setCookie(response, `${name}=; ${cookieAttributes}; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT`);
+  const signPrivacy = payload => crypto.createHmac('sha256', secret).update(`privacy:${payload}`).digest('base64url');
+  const emptyPrivacy = () => ({ version: PRIVACY_VERSION, statistics: null, expiresAt: null });
+  const publicPrivacy = preference => preference
+    ? { version: PRIVACY_VERSION, statistics: preference.choice, expiresAt: preference.expiresAt }
+    : emptyPrivacy();
+  function readPrivacyEvents(now) {
+    if (!fs.existsSync(privacyEventsFile)) return [];
+    const source = fs.readFileSync(privacyEventsFile, 'utf8');
+    const records = source.split('\n').filter(Boolean).map(line => JSON.parse(line));
+    const active = records.filter(record => Number.isFinite(Date.parse(record.expiresAt)) && Date.parse(record.expiresAt) > now);
+    if (active.length !== records.length) atomicWrite(privacyEventsFile, active.map(record => JSON.stringify(record)).join('\n') + (active.length ? '\n' : ''));
+    return active;
+  }
+  function readPrivacy(request, response) {
+    const now = Date.now();
+    const events = readPrivacyEvents(now);
+    const value = cookieValue(request, 'sirius_privacy');
+    let preference = null;
+    if (value && value.length <= 2048) {
+      const [payload, signature, extra] = value.split('.');
+      if (!extra && /^[\w-]+$/.test(payload || '') && /^[\w-]{43}$/.test(signature || '') &&
+          crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(signPrivacy(payload)))) {
+        try {
+          const record = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+          if (record.version === PRIVACY_VERSION && ['accepted', 'rejected'].includes(record.choice) &&
+              /^[a-f0-9-]{36}$/.test(record.receiptId || '') && Number.isFinite(Date.parse(record.createdAt)) &&
+              Date.parse(record.createdAt) <= now && Date.parse(record.expiresAt) > now &&
+              sixCalendarMonthsAfter(record.createdAt).toISOString() === record.expiresAt &&
+              events.some(event => event.receiptId === record.receiptId && event.choice === record.choice &&
+                event.version === record.version && event.createdAt === record.createdAt && event.expiresAt === record.expiresAt)) {
+            preference = record;
+          }
+        } catch { /* Invalid, expired and obsolete preferences never enable statistics. */ }
+      }
+    }
+    if (!preference && value) clearCookie(response, 'sirius_privacy');
+    if (preference?.choice !== 'accepted' && cookieValue(request, 'sirius_session') !== undefined) clearCookie(response, 'sirius_session');
+    return preference;
   }
   const contactAttempts = new Map();
 
@@ -248,12 +312,32 @@ export function createServer(options = {}) {
         return json(response, 200, publicArticle(article, true));
       }
       if (pathname === '/api/stats' && request.method === 'GET') return json(response, 200, readStats());
+      if (pathname === '/api/privacy' && request.method === 'GET') {
+        return json(response, 200, publicPrivacy(readPrivacy(request, response)));
+      }
+      if (pathname === '/api/privacy' && request.method === 'POST') {
+        const body = await readBody(request);
+        if (!['accepted', 'rejected'].includes(body.statistics)) throw httpError(400, 'Scegli se accettare o rifiutare le statistiche.');
+        const now = new Date();
+        const preference = {
+          receiptId: crypto.randomUUID(), choice: body.statistics, version: PRIVACY_VERSION,
+          createdAt: now.toISOString(), expiresAt: sixCalendarMonthsAfter(now).toISOString(),
+        };
+        const records = readPrivacyEvents(now.getTime());
+        atomicWrite(privacyEventsFile, [...records, preference].map(record => JSON.stringify(record)).join('\n') + '\n');
+        const payload = Buffer.from(JSON.stringify(preference)).toString('base64url');
+        const duration = Math.floor((Date.parse(preference.expiresAt) - now.getTime()) / 1000);
+        setCookie(response, `sirius_privacy=${payload}.${signPrivacy(payload)}; ${cookieAttributes}; Max-Age=${duration}; Expires=${new Date(preference.expiresAt).toUTCString()}`);
+        if (preference.choice === 'rejected') clearCookie(response, 'sirius_session');
+        return json(response, 200, publicPrivacy(preference));
+      }
       if (pathname === '/api/visit' && request.method === 'POST') {
-        const cookie = String(request.headers.cookie || '').split(';').map(value => value.trim()).find(value => value.startsWith('sirius_session='))?.slice('sirius_session='.length);
+        if (readPrivacy(request, response)?.choice !== 'accepted') throw httpError(403, 'Le statistiche richiedono una scelta di accettazione valida.');
+        const cookie = cookieValue(request, 'sirius_session');
         let stats = readStats();
         if (!validSession(cookie)) {
           const id = crypto.randomUUID();
-          response.setHeader('Set-Cookie', `sirius_session=${id}.${sign(id)}; Path=/; HttpOnly; SameSite=Lax${options.secureCookies || process.env.COOKIE_SECURE === '1' ? '; Secure' : ''}`);
+          setCookie(response, `sirius_session=${id}.${sign(id)}; ${cookieAttributes}`);
           stats = { visits: stats.visits + 1 };
           atomicJSON(statsFile, stats);
         }
@@ -264,15 +348,15 @@ export function createServer(options = {}) {
         if (body.website) return json(response, 200, { ok: true });
         if (typeof body.name !== 'string' || body.name.trim().length < 2 || body.name.trim().length > 100 ||
             typeof body.email !== 'string' || body.email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(body.email.trim()) ||
-            typeof body.message !== 'string' || body.message.trim().length < 10 || body.message.trim().length > 5000 || body.privacy !== true) {
-          throw httpError(400, 'Controlla nome, email, messaggio (10–5000 caratteri) e consenso privacy.');
+            typeof body.message !== 'string' || body.message.trim().length < 10 || body.message.trim().length > 5000) {
+          throw httpError(400, 'Controlla nome, email e messaggio (10–5000 caratteri).');
         }
         const now = Date.now();
         for (const [key, value] of contactAttempts) if (value.reset <= now) contactAttempts.delete(key);
         const address = request.socket.remoteAddress || 'unknown';
         const attempts = contactAttempts.get(address) ?? { count: 0, reset: now + 60 * 60 * 1000 };
         if (attempts.count >= 5) { response.setHeader('Retry-After', String(Math.ceil((attempts.reset - now) / 1000))); throw httpError(429, 'Hai inviato diversi messaggi. Riprova tra un’ora.'); }
-        fs.appendFileSync(path.join(dataDir, 'messages.ndjson'), `${JSON.stringify({ createdAt: new Date().toISOString(), name: body.name.trim(), email: body.email.trim(), message: body.message.trim(), privacy: true })}\n`, { mode: 0o600 });
+        fs.appendFileSync(path.join(dataDir, 'messages.ndjson'), `${JSON.stringify({ createdAt: new Date().toISOString(), name: body.name.trim(), email: body.email.trim(), message: body.message.trim(), privacyNoticeVersion: PRIVACY_VERSION })}\n`, { mode: 0o600 });
         attempts.count++;
         contactAttempts.set(address, attempts);
         return json(response, 200, { ok: true });
