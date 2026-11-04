@@ -118,47 +118,49 @@
   .orbit-one { width: 56%; }
 }
 
-/* A transparent, vertical logo floats over each page; no sidebar or panel. */
+/* Match the reference: a white, rounded tab attached to the left edge. */
 :root {
-  --floating-logo-length: 220px;
-  --floating-logo-inset: 12px;
+  --floating-logo-length: min(216px, calc(100dvh - 64px));
+  --floating-tab-width: 72px;
+  --floating-tab-height: 264px;
   --logo-clearance: 96px;
   --page-edge: 40px;
 }
 
 .floating-brand {
   position: fixed;
-  left: var(--floating-logo-inset);
+  left: 0;
   top: 50%;
   z-index: 200;
   display: block;
-  width: var(--floating-logo-length);
+  width: var(--floating-tab-width);
+  height: min(var(--floating-tab-height), calc(100dvh - 32px));
   margin: 0;
   padding: 0;
   border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
+  border-radius: 0 18px 18px 0;
+  background: #fff;
+  box-shadow: 12px 0 32px rgba(0, 0, 0, .23);
+  overflow: hidden;
   line-height: 0;
-  transform-origin: 0 0;
-  transform: rotate(-90deg) translateX(-50%);
+  transform: translateY(-50%);
 }
 
 .floating-logo {
+  position: absolute;
+  left: 50%;
+  top: 50%;
   display: block;
-  width: 100%;
+  width: var(--floating-logo-length);
   max-width: none;
   height: auto;
-  filter: drop-shadow(0 0 1px rgba(255, 255, 255, .95)) drop-shadow(0 0 2px rgba(255, 255, 255, .65));
-}
-
-:root[data-theme="light"] .floating-logo {
   filter: none;
+  transform: translate(-50%, -50%) rotate(-90deg);
 }
 
 .floating-brand:focus-visible {
-  outline: 2px solid #8bdcff;
-  outline-offset: 5px;
+  outline: 3px solid var(--brand-indigo);
+  outline-offset: -5px;
 }
 
 /* Keep a clear margin around the floating artwork, without shifting the body. */
@@ -190,8 +192,9 @@
 
 @media (max-width: 820px) {
   :root {
-    --floating-logo-length: 144px;
-    --floating-logo-inset: 4px;
+    --floating-logo-length: min(152px, calc(100dvh - 64px));
+    --floating-tab-width: 52px;
+    --floating-tab-height: 202px;
     --logo-clearance: 64px;
     --page-edge: 21px;
   }

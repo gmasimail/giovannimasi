@@ -102,8 +102,7 @@ Il modulo valida nome, email, messaggio e consenso privacy. Include un campo ant
 - Le pagine includono navigazione comune, contatore e informativa privacy.
 - `public/styles.css`: colori, tipografia, impaginazione e versione mobile.
 - `public/brand.css`: dimensioni del logo originale e accenti indaco/giallo, su desktop e telefono.
-- `public/assets/sirius-logo.png`: file originale dell’azienda, conservato e usato nel piè di pagina, nella grafica delle orbite e come icona del sito.
-- `public/assets/sirius-logo-transparent.png`: variante con fondo trasparente per il logo laterale, verticale e fisso sopra tutte le pagine. Non è inserito in una fascia o in un riquadro. La rimozione del fondo tramite generazione di immagini può introdurre lievi differenze nei contorni rispetto all’originale, che rimane disponibile separatamente.
+- `public/assets/sirius-logo.png`: file originale dell’azienda, usato senza ritocchi nella linguetta bianca laterale, nel piè di pagina, nella grafica delle orbite e come icona del sito. La linguetta riprende il riferimento fornito: logo verticale, angoli arrotondati a destra e ombra morbida. È fissata al bordo sinistro di tutte le pagine e resta visibile durante lo scorrimento.
 - `public/app.js`: interazioni, magazine, modulo contatti e contatore.
 - `public/effects.js`: ingresso progressivo dei riquadri durante lo scorrimento e riflesso luminoso che segue il puntatore, come nel riferimento. Gli effetti rispettano la preferenza di movimento ridotto del browser.
 - `fileArticoli/`: contenuti editoriali modificabili senza programmare.
