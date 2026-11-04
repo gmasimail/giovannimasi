@@ -279,8 +279,13 @@ export function createServer(options = {}) {
       }
       if (pathname.startsWith('/api/')) throw httpError(request.method === 'GET' || request.method === 'POST' ? 404 : 405, 'Endpoint non disponibile.');
       if (!['GET', 'HEAD'].includes(request.method)) { response.setHeader('Allow', 'GET, HEAD'); throw httpError(405, 'Metodo non consentito.'); }
-      const appRoute = pathname === '/' || pathname === '/articoli' || pathname === '/privacy' || /^\/articoli\/[^/]+\/?$/.test(pathname);
-      const staticPath = appRoute ? 'index.html' : pathname.replace(/^\/+/, '');
+      const pages = new Map([
+        ['/', 'index.html'], ['/azienda', 'azienda.html'], ['/soluzioni', 'soluzioni.html'],
+        ['/articoli', 'articoli.html'], ['/contatti', 'contatti.html'], ['/privacy', 'index.html'],
+      ]);
+      const pagePath = pathname.replace(/\/$/, '') || '/';
+      const staticPath = pages.get(pagePath) ?? (/^\/articoli\/[^/]+\/?$/.test(pathname)
+        ? 'articoli.html' : pathname.replace(/^\/+/, ''));
       if (staticPath.split('/').some(part => part.startsWith('.'))) throw httpError(404, 'File non trovato.');
       const filename = path.resolve(publicDir, staticPath);
       if (!filename.startsWith(publicDir + path.sep)) throw httpError(404, 'File non trovato.');

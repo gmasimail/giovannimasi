@@ -45,8 +45,12 @@ COSA SAPERE
   Non invia email: puoi leggere le richieste con un editor di testo.
 - Conserva la cartella data se aggiorni o sposti il sito e vuoi mantenere
   visite, messaggi e ordine degli articoli.
-- I testi descrivono Sirius come azienda di strategia, design e tecnologia:
-  personalizzali con le informazioni reali della tua azienda.
+- La mission di Sirius è Innovare, Semplificare e Potenziare. Il sito
+  presenta partnership strategica, persone e change management, innovazione
+  continua, sicurezza e sostenibilità. Completa i recapiti e i dati legali
+  della tua azienda prima della pubblicazione.
+- Le pagine Home, Azienda, Soluzioni, Articoli e Contatti riprendono il
+  riferimento blu notte e azzurro. Puoi scegliere il tema chiaro o scuro.
 - Il sito avviato sul PC è locale. Per renderlo pubblico serve un hosting
   Node.js con disco persistente e HTTPS. GitHub Pages non è sufficiente.
 

@@ -11,6 +11,9 @@ async function fixture(t) {
   fs.mkdirSync(path.join(rootDir, 'public'));
   fs.mkdirSync(path.join(rootDir, 'fileArticoli'));
   fs.writeFileSync(path.join(rootDir, 'public', 'index.html'), '<h1>Sirius test</h1>');
+  for (const page of ['azienda', 'soluzioni', 'articoli', 'contatti']) {
+    fs.writeFileSync(path.join(rootDir, 'public', `${page}.html`), `<h1>Sirius ${page}</h1>`);
+  }
   fs.writeFileSync(path.join(rootDir, 'public', 'app.js'), 'console.log("Sirius");');
   const server = createServer({ rootDir });
   server.listen(0, '127.0.0.1');
@@ -204,4 +207,18 @@ test('mutazioni cross-site, richieste oversized e payload malformati rifiutati',
   assert.equal((await request('/api/contact', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{nonjson' })).status, 400);
   assert.equal((await request('/api/contact', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: 'a'.repeat(40000) }) })).status, 413);
   assert.equal((await request('/api/contact', { method: 'POST', body: 'nome=Giovanni' })).status, 415);
+});
+
+test('pagine aziendali distinte, alias e link diretti agli articoli', async t => {
+  const { request } = await fixture(t);
+  assert.equal(await (await request('/')).text(), '<h1>Sirius test</h1>');
+  for (const page of ['azienda', 'soluzioni', 'articoli', 'contatti']) {
+    for (const url of [`/${page}`, `/${page}/`, `/${page}.html`]) {
+      const response = await request(url);
+      assert.equal(response.status, 200, url);
+      assert.equal(await response.text(), `<h1>Sirius ${page}</h1>`, url);
+    }
+  }
+  assert.equal(await (await request('/articoli/un-articolo')).text(), '<h1>Sirius articoli</h1>');
+  assert.equal((await request('/pagina-inesistente')).status, 404);
 });

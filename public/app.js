@@ -2,6 +2,9 @@
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+const originalPageTitle = document.title;
+const hasArchive = Boolean($('#article-grid'));
+const hasRecentArticles = Boolean($('#recent-articles'));
 const state = { q: '', category: '', topic: '', page: 1, pageSize: 10, totalPages: 1 };
 const dateFormatter = new Intl.DateTimeFormat('it-IT', { day: 'numeric', month: 'short', year: 'numeric' });
 const numberFormatter = new Intl.NumberFormat('it-IT');
@@ -11,7 +14,10 @@ let latestListSignature = '';
 let searchTimer;
 let focusedBeforeArticle;
 let focusedBeforePrivacy;
-let articleReturnUrl = '/#articoli';
+let articleReturnUrl = '/articoli.html#articoli';
+let recentController;
+let latestRecentSignature = '';
+
 let activeArticleId = null;
 
 function element(tag, className, text) {
@@ -69,7 +75,7 @@ function articleCard(article, index) {
   });
   const art = element('div', `article-art ${artClass(article, index)}`);
   art.setAttribute('aria-hidden', 'true');
-  art.append(element('span', 'article-art-index', 'SIRIUS / PROSPETTIVE'), element('span', 'article-art-mark', '✳'));
+  art.append(element('span', 'article-art-index', 'SIRIUS / PROSPETTIVE'), element('span', 'article-art-mark', '✦'));
   const meta = element('div', 'article-meta');
   meta.append(element('span', 'category-pill', article.category), element('span', '', `${article.readTime || 1} min di lettura`));
   const bottom = element('div', 'article-card-bottom');
@@ -119,6 +125,7 @@ function renderPagination(totalPages) {
 }
 
 async function loadArticles({ silent = false } = {}) {
+  if (!hasArchive) return;
   listController?.abort();
   const controller = new AbortController();
   listController = controller;
@@ -183,12 +190,12 @@ function resetFilters() {
   applyFilters();
 }
 
-$('#article-filters').addEventListener('submit', event => { event.preventDefault(); applyFilters(); });
-$('#article-filters').addEventListener('reset', event => { event.preventDefault(); resetFilters(); });
-$('#article-search').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(applyFilters, 250); });
-for (const selector of ['#article-category', '#article-topic', '#page-size']) $(selector).addEventListener('change', applyFilters);
-$('#clear-search').addEventListener('click', resetFilters);
-$('#retry-articles').addEventListener('click', () => loadArticles());
+$('#article-filters')?.addEventListener('submit', event => { event.preventDefault(); applyFilters(); });
+$('#article-filters')?.addEventListener('reset', event => { event.preventDefault(); resetFilters(); });
+$('#article-search')?.addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(applyFilters, 250); });
+for (const selector of ['#article-category', '#article-topic', '#page-size']) $(selector)?.addEventListener('change', applyFilters);
+$('#clear-search')?.addEventListener('click', resetFilters);
+$('#retry-articles')?.addEventListener('click', () => loadArticles());
 
 // Markdown is built from text nodes: article files never become executable HTML.
 function renderInline(parent, source, depth = 0) {
@@ -295,6 +302,7 @@ function syncDialogScroll() {
 
 async function openArticle(id, navigate = false) {
   const dialog = $('#article-dialog');
+  if (!dialog) return;
   if (!dialog.open) focusedBeforeArticle = document.activeElement;
   if (navigate) {
     if (!dialog.open) articleReturnUrl = `${location.pathname}${location.search}${location.hash}`;
@@ -340,34 +348,37 @@ async function openArticle(id, navigate = false) {
 
 function closeArticle({ navigate = true } = {}) {
   const dialog = $('#article-dialog');
-  if (!dialog.open) return;
+  if (!dialog?.open) return;
   articleController?.abort();
   activeArticleId = null;
   dialog.close();
   if (navigate && /^\/articoli\/[^/]+\/?$/.test(location.pathname)) history.replaceState({}, '', articleReturnUrl);
-  document.title = 'Sirius — Idee chiare. Nuove possibilità.';
+  document.title = originalPageTitle;
   syncDialogScroll();
-  if (focusedBeforeArticle?.isConnected) focusedBeforeArticle.focus({ preventScroll: true });
+  const focusTarget = focusedBeforeArticle?.isConnected ? focusedBeforeArticle : $('.article-link');
+  focusTarget?.focus({ preventScroll: true });
 }
 
 for (const button of $$('[data-close-article]')) button.addEventListener('click', () => closeArticle());
-$('#article-dialog').addEventListener('cancel', event => { event.preventDefault(); closeArticle(); });
-$('.dialog-brand').addEventListener('click', event => { event.preventDefault(); closeArticle(); $('#articoli').scrollIntoView(); });
+$('#article-dialog')?.addEventListener('cancel', event => { event.preventDefault(); closeArticle(); });
+$('.dialog-brand')?.addEventListener('click', event => {
+  if (hasArchive) { event.preventDefault(); closeArticle(); $('#articoli').scrollIntoView(); }
+});
 
 function openPrivacy() {
   focusedBeforePrivacy = document.activeElement;
-  $('#privacy-dialog').showModal();
+  if (!$('#privacy-dialog')?.open) $('#privacy-dialog')?.showModal();
   syncDialogScroll();
 }
 function closePrivacy() {
-  $('#privacy-dialog').close();
+  $('#privacy-dialog')?.close();
   syncDialogScroll();
   if (focusedBeforePrivacy?.isConnected) focusedBeforePrivacy.focus({ preventScroll: true });
-  if (location.pathname === '/privacy') history.replaceState({}, '', '/');
+  if (/^\/privacy\/?$/.test(location.pathname)) history.replaceState({}, '', '/');
 }
 for (const button of $$('[data-open-privacy]')) button.addEventListener('click', openPrivacy);
 for (const button of $$('[data-close-privacy]')) button.addEventListener('click', closePrivacy);
-$('#privacy-dialog').addEventListener('cancel', event => { event.preventDefault(); closePrivacy(); });
+$('#privacy-dialog')?.addEventListener('cancel', event => { event.preventDefault(); closePrivacy(); });
 for (const dialog of $$('dialog')) {
   dialog.addEventListener('click', event => {
     if (event.target !== dialog) return;
@@ -385,7 +396,7 @@ window.addEventListener('popstate', () => {
   } else closeArticle({ navigate: false });
 });
 
-$('#contact-form').addEventListener('submit', async event => {
+$('#contact-form')?.addEventListener('submit', async event => {
   event.preventDefault();
   const form = event.currentTarget;
   if (!form.reportValidity()) return;
@@ -414,20 +425,20 @@ $('#contact-form').addEventListener('submit', async event => {
 
 const menuToggle = $('.menu-toggle');
 function closeMenu() {
-  menuToggle.setAttribute('aria-expanded', 'false');
-  menuToggle.setAttribute('aria-label', 'Apri il menu');
-  $('#main-nav').classList.remove('is-open');
+  menuToggle?.setAttribute('aria-expanded', 'false');
+  menuToggle?.setAttribute('aria-label', 'Apri il menu');
+  $('#main-nav')?.classList.remove('is-open');
 }
-menuToggle.addEventListener('click', () => {
+menuToggle?.addEventListener('click', () => {
   const expanded = menuToggle.getAttribute('aria-expanded') !== 'true';
-  menuToggle.setAttribute('aria-expanded', String(expanded));
-  menuToggle.setAttribute('aria-label', expanded ? 'Chiudi il menu' : 'Apri il menu');
+  menuToggle?.setAttribute('aria-expanded', String(expanded));
+  menuToggle?.setAttribute('aria-label', expanded ? 'Chiudi il menu' : 'Apri il menu');
   $('#main-nav').classList.toggle('is-open', expanded);
 });
 for (const link of $$('#main-nav a')) link.addEventListener('click', closeMenu);
 document.addEventListener('keydown', event => { if (event.key === 'Escape') closeMenu(); });
-document.addEventListener('click', event => { if (!$('.site-header').contains(event.target)) closeMenu(); });
-window.matchMedia('(min-width: 801px)').addEventListener('change', event => { if (event.matches) closeMenu(); });
+document.addEventListener('click', event => { if (!$('.site-header')?.contains(event.target)) closeMenu(); });
+window.matchMedia('(min-width: 821px)').addEventListener('change', event => { if (event.matches) closeMenu(); });
 
 async function refreshStats(register = false) {
   try {
@@ -438,15 +449,72 @@ async function refreshStats(register = false) {
   }
 }
 
+function setTheme(theme, persist = false) {
+  document.documentElement.dataset.theme = theme;
+  const button = $('.theme-toggle');
+  const label = theme === 'dark' ? 'Attiva tema chiaro' : 'Attiva tema scuro';
+  button?.setAttribute('aria-label', label);
+  button?.setAttribute('title', label);
+  button?.setAttribute('aria-pressed', String(theme === 'light'));
+  const themeColor = $('meta[name="theme-color"]');
+  if (themeColor) themeColor.content = theme === 'dark' ? '#041027' : '#f2f6fd';
+  const icon = $('.theme-icon');
+  if (icon) {
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', theme === 'dark' ? 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5' : 'M20.5 14A8.5 8.5 0 0 1 10 3.5 8.5 8.5 0 1 0 20.5 14Z');
+    icon.replaceChildren(path);
+  }
+  if (persist) {
+    try { localStorage.setItem('sirius-theme', theme); } catch { /* Storage can be disabled by the visitor. */ }
+  }
+}
+let savedTheme = 'dark';
+try { if (localStorage.getItem('sirius-theme') === 'light') savedTheme = 'light'; } catch { /* Default remains dark. */ }
+setTheme(savedTheme);
+$('.theme-toggle')?.addEventListener('click', () => setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark', true));
+
+async function loadRecentArticles({ silent = false } = {}) {
+  if (!hasRecentArticles) return;
+  recentController?.abort();
+  const controller = new AbortController();
+  recentController = controller;
+  const grid = $('#recent-articles');
+  const status = $('#recent-articles-status');
+  if (!silent) grid.setAttribute('aria-busy', 'true');
+  try {
+    const data = await api('/api/articles?page=1&pageSize=10', { signal: controller.signal });
+    if (controller.signal.aborted) return;
+    const articles = data.articles.slice(0, 3);
+    const signature = JSON.stringify(articles);
+    if (signature !== latestRecentSignature || !silent) {
+      grid.replaceChildren(...articles.map(articleCard));
+      latestRecentSignature = signature;
+    }
+    status.textContent = articles.length ? '' : 'Il Journal è in preparazione: i nuovi approfondimenti appariranno qui.';
+  } catch (error) {
+    if (error.name === 'AbortError') return;
+    if (!silent) {
+      grid.replaceChildren();
+      status.textContent = 'Non riusciamo a caricare gli articoli in questo momento. Riprova tra poco.';
+    }
+  } finally {
+    if (!controller.signal.aborted) grid.setAttribute('aria-busy', 'false');
+  }
+}
+
 $('#current-year').textContent = String(new Date().getFullYear());
 loadArticles();
+loadRecentArticles();
 refreshStats(true);
-setInterval(() => {
-  if (!document.hidden) { loadArticles({ silent: true }); refreshStats(); }
-}, 30_000);
-document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) { loadArticles({ silent: true }); refreshStats(); }
-});
+function refreshVisibleContent() {
+  if (!document.hidden) {
+    loadArticles({ silent: true });
+    loadRecentArticles({ silent: true });
+    refreshStats();
+  }
+}
+setInterval(refreshVisibleContent, 30_000);
+document.addEventListener('visibilitychange', refreshVisibleContent);
 const initialArticle = location.pathname.match(/^\/articoli\/([^/]+)\/?$/);
 if (initialArticle) openArticle(safeDecodeId(initialArticle[1]));
-if (location.pathname === '/privacy') openPrivacy();
+if (location.pathname === '/privacy' || location.pathname === '/privacy/') openPrivacy();

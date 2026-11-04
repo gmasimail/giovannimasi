@@ -1,6 +1,10 @@
 # Sirius — sito aziendale e magazine
 
-Un sito responsive in italiano, con presentazione aziendale, servizi, metodo, magazine, modulo contatti e contatore delle visite. HTML, CSS, JavaScript e un piccolo server Node.js: nessun pacchetto esterno da installare e nessun account obbligatorio.
+Un sito aziendale responsive in italiano, con pagine Home, Azienda, Soluzioni, Articoli e Contatti. Il design riprende il riferimento fornito: blu notte, accenti azzurri, orbite e schede arrotondate, con tema scuro e chiaro. Include magazine, modulo contatti e contatore delle visite. HTML, CSS, JavaScript e un piccolo server Node.js: nessun pacchetto esterno da installare e nessun account obbligatorio.
+
+![Anteprima della nuova homepage Sirius in blu notte e azzurro](docs/anteprima.png)
+
+[Visualizza l’anteprima su telefono](docs/anteprima-mobile.png).
 
 ## 1. Avvio sul tuo PC
 
@@ -80,7 +84,7 @@ Word e PDF non sono interpretati come articoli: esporta o copia il testo in uno 
 
 Il contatore è condiviso tra i visitatori e viene salvato sul server nella cartella `data`. Conta una visita per sessione del browser attraverso un cookie tecnico: ricaricare la pagina nella stessa sessione non aggiunge visite. Una nuova sessione può aggiungerne una.
 
-Non rappresenta il numero di persone uniche e non è un sistema di analisi certificato: cookie bloccati, strumenti automatici e comportamenti del browser possono influire sul totale. Non vengono usati servizi di analisi esterni. I dati restano disponibili dopo il riavvio del server; conserva la cartella `data` quando aggiorni il sito e includila nei backup.
+Non rappresenta il numero di persone uniche e non è un sistema di analisi certificato: cookie bloccati, strumenti automatici e comportamenti del browser possono influire sul totale. Non vengono usati servizi di analisi esterni. La scelta del tema chiaro o scuro è salvata soltanto nel browser come preferenza tecnica. I dati restano disponibili dopo il riavvio del server; conserva la cartella `data` quando aggiorni il sito e includila nei backup.
 
 ## 4. Modulo contatti
 
@@ -90,13 +94,18 @@ Il modulo valida nome, email, messaggio e consenso privacy. Include un campo ant
 
 ## 5. Personalizzare l'azienda
 
-- `public/index.html`: presentazione, servizi, metodo, contatti e informativa privacy.
+- `public/index.html`: homepage, mission, impegni e ultimi articoli.
+- `public/azienda.html`: identità aziendale, mission e partnership strategica.
+- `public/soluzioni.html`: aree di intervento e accompagnamento al cambiamento.
+- `public/articoli.html`: archivio con ricerca, filtri e paginazione.
+- `public/contatti.html`: modulo per registrare una richiesta.
+- Le pagine includono navigazione comune, contatore e informativa privacy.
 - `public/styles.css`: colori, tipografia, impaginazione e versione mobile.
 - `public/app.js`: interazioni, magazine, modulo contatti e contatore.
 - `fileArticoli/`: contenuti editoriali modificabili senza programmare.
 - `server.mjs`: server, API, contatore e salvataggio contatti.
 
-Il sito presenta **Sirius come esempio di azienda che si occupa di strategia, design e tecnologia**. Prima dell'uso pubblico sostituisci i testi con la vera attività aziendale e completa ragione sociale, recapiti, partita IVA se prevista, titolare del trattamento e tempi di conservazione effettivi. L'informativa inclusa descrive le funzioni tecniche del modello e va completata per l'azienda reale.
+La mission di Sirius è **Innovare, Semplificare e Potenziare**: introdurre tecnologie e metodologie moderne nei processi tradizionali, trasformare procedure complesse in workflow digitali efficienti e permettere a persone e organizzazioni di concentrarsi sul core business e creare valore. La presentazione comprende partnership strategica a lungo termine, centralità delle persone e change management, innovazione continua e scalabilità, sicurezza dei dati e sostenibilità attraverso la dematerializzazione. Prima dell'uso pubblico completa ragione sociale, recapiti, partita IVA se prevista, titolare del trattamento e tempi di conservazione effettivi. L'informativa inclusa descrive le funzioni tecniche del modello e va completata per l'azienda reale.
 
 ## 6. Dal PC a Internet
 
