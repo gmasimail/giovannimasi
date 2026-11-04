@@ -102,6 +102,7 @@ Il modulo valida nome, email, messaggio e consenso privacy. Include un campo ant
 - Le pagine includono navigazione comune, contatore e informativa privacy.
 - `public/styles.css`: colori, tipografia, impaginazione e versione mobile.
 - `public/app.js`: interazioni, magazine, modulo contatti e contatore.
+- `public/effects.js`: ingresso progressivo dei riquadri durante lo scorrimento e riflesso luminoso che segue il puntatore, come nel riferimento. Gli effetti rispettano la preferenza di movimento ridotto del browser.
 - `fileArticoli/`: contenuti editoriali modificabili senza programmare.
 - `server.mjs`: server, API, contatore e salvataggio contatti.
 
