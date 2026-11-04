@@ -1,0 +1,53 @@
+SIRIUS — IL TUO SITO
+===================
+
+COME APRIRLO SU WINDOWS
+
+1. Estrai tutta la cartella Sirius dallo ZIP sul tuo PC.
+2. Installa Node.js LTS (22 o successivo) dal sito https://nodejs.org/
+   Se Node.js è già installato, salta questo passaggio.
+3. Fai doppio clic sul file Avvia-Sirius.bat.
+4. Lascia aperta la finestra che compare e apri il browser a:
+
+   http://localhost:3000
+
+5. Per fermare il sito, premi Ctrl+C nella finestra del server.
+
+MAC / LINUX
+
+Apri il terminale nella cartella Sirius ed esegui:
+
+   node server.mjs
+
+Poi apri http://localhost:3000 nel browser.
+Su Mac puoi anche provare il file Avvia-Sirius.command.
+
+COME AGGIUNGERE UN ARTICOLO
+
+- Copia Modello-articolo.md nella cartella fileArticoli.
+- Cambia il nome del nuovo file e aprilo con un editor di testo.
+- Sostituisci il titolo, la descrizione, la categoria, l'argomento e il testo.
+- Salva: il nuovo articolo apparirà in cima al Journal.
+- Puoi ricaricare la pagina per vederlo subito. Il sito controlla anche
+  automaticamente gli aggiornamenti ogni 30 secondi.
+
+Puoi usare file .md, .txt e .json in UTF-8. Word e PDF non vengono convertiti.
+I 14 articoli inclusi sono esempi: puoi modificarli o cancellarli.
+La data di pubblicazione scritta nel file è indipendente dall'ordine
+di inserimento. Non è necessario riavviare il sito dopo ogni articolo.
+
+COSA SAPERE
+
+- Non aprire soltanto public/index.html: serve avviare il server.
+- Il contatore delle visite viene salvato nella cartella data, creata
+  automaticamente al primo avvio. Conta una visita per sessione del browser.
+- Il modulo contatti salva i messaggi nel file data/messages.ndjson.
+  Non invia email: puoi leggere le richieste con un editor di testo.
+- Conserva la cartella data se aggiorni o sposti il sito e vuoi mantenere
+  visite, messaggi e ordine degli articoli.
+- I testi descrivono Sirius come azienda di strategia, design e tecnologia:
+  personalizzali con le informazioni reali della tua azienda.
+- Il sito avviato sul PC è locale. Per renderlo pubblico serve un hosting
+  Node.js con disco persistente e HTTPS. GitHub Pages non è sufficiente.
+
+Per istruzioni complete, personalizzazione e pubblicazione leggi README.md.
